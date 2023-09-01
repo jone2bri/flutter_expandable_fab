@@ -1,25 +1,22 @@
+library flutter_expandable_fab;
+
 import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
-import '../flutter_expandable_fab.dart';
+// Inspired by this article.
+// https://docs.flutter.dev/cookbook/effects/expandable-fab
 
 /// The type of behavior of this widget.
-enum ExpandableFabType { fan, up, side }
+enum ExpandableFabType { fan, up, left, right }
 
-/// The position options for the FAB on the screen.
-enum ExpandableFabPos { right, left }
+/// The size of the expanded FAB.
+enum ExpandableFabSize { small, regular, large }
 
-/// Style configuration for the overlay displayed behind the Expandable FAB.
+/// Style of the overlay.
 @immutable
 class ExpandableFabOverlayStyle {
-  /// Creates an `ExpandableFabOverlayStyle` with the specified optional parameters.
-  ///
-  /// - [color]: The color to paint behind the FAB.
-  /// - [blur]: The strength of the blur behind the FAB.
-  ///
-  /// Only one of [color] or [blur] can be specified; both cannot be non-null at the same time.
   ExpandableFabOverlayStyle({
     this.color,
     this.blur,
@@ -35,31 +32,49 @@ class ExpandableFabOverlayStyle {
   final double? blur;
 }
 
-/// A FloatingActionButton that can show/hide multiple action buttons with animation.
-///
-/// ```dart
-/// Scaffold(
-///   floatingActionButtonLocation: ExpandableFab.location,
-///   floatingActionButton: ExpandableFab(
-///     children: [
-///       FloatingActionButton.small(
-///         heroTag: null,
-///         child: const Icon(Icons.edit),
-///         onPressed: () {},
-///       ),
-///       FloatingActionButton.small(
-///         heroTag: null,
-///         child: const Icon(Icons.search),
-///         onPressed: () {},
-///       ),
-///     ],
-///   ),
-/// );
-/// ```
-///
+/// Style of the close button.
+@immutable
+class ExpandableFabCloseButtonStyle {
+  const ExpandableFabCloseButtonStyle({
+    this.child = const Icon(Icons.close),
+    this.foregroundColor,
+    this.backgroundColor,
+    
+  });
+
+  /// The widget below the close button widget in the tree.
+  final Widget child;
+
+  /// The default foreground color for icons and text within the button.
+  final Color? foregroundColor;
+
+  /// The button's background color.
+  final Color? backgroundColor;
+}
+
+class _ExpandableFabLocation extends StandardFabLocation {
+  final ValueNotifier<ScaffoldPrelayoutGeometry?> scaffoldGeometry =
+      ValueNotifier(null);
+
+  @override
+  double getOffsetX(
+      ScaffoldPrelayoutGeometry scaffoldGeometry, double adjustment) {
+    Future.microtask(() {
+      this.scaffoldGeometry.value = scaffoldGeometry;
+    });
+    return 0;
+  }
+
+  @override
+  double getOffsetY(
+      ScaffoldPrelayoutGeometry scaffoldGeometry, double adjustment) {
+    return -scaffoldGeometry.snackBarSize.height;
+  }
+}
+
+/// Fab button that can show/hide multiple action buttons with animation.
 @immutable
 class ExpandableFab extends StatefulWidget {
-  /// The location of the ExpandableFab on the screen.
   static final FloatingActionButtonLocation location = _ExpandableFabLocation();
 
   const ExpandableFab({
@@ -69,16 +84,23 @@ class ExpandableFab extends StatefulWidget {
     this.fanAngle = 90,
     this.initialOpen = false,
     this.type = ExpandableFabType.fan,
-    this.pos = ExpandableFabPos.right,
-    this.closeButtonBuilder,
-    this.openButtonBuilder,
-    this.childrenOffset = Offset.zero,
+    this.collapsedFabSize = ExpandableFabSize.regular,
+    this.expandedFabSize = ExpandableFabSize.regular,
+    this.collapsedFabShape,
+    this.expandedFabShape,
+    this.closeButtonStyle = const ExpandableFabCloseButtonStyle(),
+    this.foregroundColor,
+    this.backgroundColor,
+    this.child = const Icon(Icons.menu),
+    this.childrenOffset = const Offset(4, 4),
     required this.children,
     this.onOpen,
     this.afterOpen,
     this.onClose,
     this.afterClose,
     this.overlayStyle,
+    this.openButtonHeroTag,
+    this.closeButtonHeroTag,
   }) : super(key: key);
 
   /// Distance from children.
@@ -96,20 +118,35 @@ class ExpandableFab extends StatefulWidget {
   /// The type of behavior of this widget.
   final ExpandableFabType type;
 
-  /// The position of the ExpandableFab on the screen
-  final ExpandableFabPos pos;
+  /// The size of the collapsed FAB.
+  final ExpandableFabSize collapsedFabSize;
 
-  /// A builder for the custom close button.
-  final FloatingActionButtonBuilder? closeButtonBuilder;
+  /// The size of the expanded FAB.
+  final ExpandableFabSize expandedFabSize;
 
-  /// A builder for the custom open button.
-  final FloatingActionButtonBuilder? openButtonBuilder;
+  /// The shape of the expanded FAB's [Material].
+  final ShapeBorder? expandedFabShape;
+
+  /// The shape of the collapsed FAB's [Material].
+  final ShapeBorder? collapsedFabShape;
+
+  /// Style of the close button.
+  final ExpandableFabCloseButtonStyle closeButtonStyle;
+
+  /// The widget below this widget in the tree.
+  final Widget child;
 
   /// For positioning of children widgets.
   final Offset childrenOffset;
 
   /// The widgets below this widget in the tree.
   final List<Widget> children;
+
+  /// The default foreground color for icons and text within the button.
+  final Color? foregroundColor;
+
+  /// The button's background color.
+  final Color? backgroundColor;
 
   /// Will be called before opening the menu.
   final VoidCallback? onOpen;
@@ -126,6 +163,12 @@ class ExpandableFab extends StatefulWidget {
   /// Provides the style for overlay. No overlay when null.
   final ExpandableFabOverlayStyle? overlayStyle;
 
+  /// The tag to apply to the open button's [Hero] widget.
+  final Object? openButtonHeroTag;
+
+  /// The tag to apply to the close button's [Hero] widget.
+  final Object? closeButtonHeroTag;
+
   @override
   State<ExpandableFab> createState() => ExpandableFabState();
 }
@@ -134,8 +177,6 @@ class ExpandableFabState extends State<ExpandableFab>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _expandAnimation;
-  late final FloatingActionButtonBuilder _openButtonBuilder;
-  late final FloatingActionButtonBuilder _closeButtonBuilder;
   bool _open = false;
 
   /// Returns whether the menu is open
@@ -173,15 +214,6 @@ class ExpandableFabState extends State<ExpandableFab>
       reverseCurve: Curves.easeOutQuad,
       parent: _controller,
     );
-    _openButtonBuilder = widget.openButtonBuilder ??
-        RotateFloatingActionButtonBuilder(
-          child: const Icon(Icons.menu),
-        );
-    _closeButtonBuilder = widget.closeButtonBuilder ??
-        DefaultFloatingActionButtonBuilder(
-          fabSize: ExpandableFabSize.small,
-          child: const Icon(Icons.close),
-        );
   }
 
   @override
@@ -201,52 +233,48 @@ class ExpandableFabState extends State<ExpandableFab>
         if (geometry == null) {
           return const SizedBox.shrink();
         }
-        double x;
-        if (widget.pos == ExpandableFabPos.right) {
-          x = kFloatingActionButtonMargin + geometry.minInsets.right;
-        } else {
-          x = -kFloatingActionButtonMargin - geometry.minInsets.left;
-        }
-        final bottomContentHeight =
-            geometry.scaffoldSize.height - geometry.contentBottom;
-        final y = kFloatingActionButtonMargin +
-            math.max(geometry.minViewPadding.bottom, bottomContentHeight);
-        if (offset != Offset(x, y)) {
+        final x = kFloatingActionButtonMargin + geometry.minInsets.right;
+        final bottomContentHeight = geometry.scaffoldSize.height - geometry.contentBottom;
+        final y = kFloatingActionButtonMargin + math.max(geometry.minViewPadding.bottom, bottomContentHeight);
+        if (offset != Offset(x, y)) 
+        {
           offset = Offset(x, y);
           cache = _buildButtons(offset!);
         }
-        return _open ? FocusScope(child: cache!) : cache!;
+        return cache!;
       }),
     );
   }
-
+  
+  // Position of initial button
   Widget _buildButtons(Offset offset) {
     final blur = widget.overlayStyle?.blur;
     final overlayColor = widget.overlayStyle?.color;
     return GestureDetector(
       onTap: () => toggle(),
       child: Stack(
-        alignment: widget.pos == ExpandableFabPos.right
-            ? Alignment.bottomRight
-            : Alignment.bottomLeft,
+        alignment: Alignment.center,
         children: [
           Container(),
           if (blur != null)
-            IgnorePointer(
+            IgnorePointer
+            (
               ignoring: !_open,
-              child: TweenAnimationBuilder<double>(
+              child: TweenAnimationBuilder<double>
+              (
                 tween: Tween<double>(begin: 0.0, end: _open ? blur : 0.0),
                 duration: widget.duration,
                 curve: Curves.easeInOut,
-                builder: (_, value, child) {
-                  if (value < 0.001) {
+                builder: (_, value, child) 
+                {
+                  if (value < 0.001) 
+                  {
                     return child!;
                   }
-                  return ClipRect(
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: value, sigmaY: value),
-                      child: child,
-                    ),
+                  return BackdropFilter
+                  (
+                    filter: ImageFilter.blur(sigmaX: value, sigmaY: value),
+                    child: child,
                   );
                 },
                 child: Container(color: Colors.transparent),
@@ -270,13 +298,7 @@ class ExpandableFabState extends State<ExpandableFab>
             child: Stack(
               alignment: Alignment.center,
               children: [
-                AnimatedOpacity(
-                  opacity: _open ? 1.0 : 0.0,
-                  curve: const Interval(0.25, 1.0, curve: Curves.easeInOut),
-                  duration: widget.duration,
-                  child: _closeButtonBuilder.builder(
-                      context, toggle, _expandAnimation),
-                ),
+                _buildTapToCloseFab(),
                 _buildTapToOpenFab(),
               ],
             ),
@@ -286,48 +308,77 @@ class ExpandableFabState extends State<ExpandableFab>
     );
   }
 
+  Widget _buildTapToCloseFab() {
+    final style = widget.closeButtonStyle;
+    switch (widget.expandedFabSize) {
+      case ExpandableFabSize.small:
+        return FloatingActionButton.small(
+          heroTag: widget.closeButtonHeroTag,
+          foregroundColor: style.foregroundColor,
+          backgroundColor: style.backgroundColor,
+          shape: widget.expandedFabShape,
+          onPressed: toggle,
+          child: style.child,
+        );
+      case ExpandableFabSize.regular:
+        return FloatingActionButton(
+          heroTag: widget.closeButtonHeroTag,
+          foregroundColor: style.foregroundColor,
+          backgroundColor: style.backgroundColor,
+          shape: widget.expandedFabShape,
+          onPressed: toggle,
+          child: style.child,
+        );
+        case ExpandableFabSize.large:
+        return FloatingActionButton.large(
+          heroTag: widget.closeButtonHeroTag,
+          foregroundColor: style.foregroundColor,
+          backgroundColor: style.backgroundColor,
+          shape: widget.expandedFabShape,
+          onPressed: toggle,
+          child: style.child,
+        );
+    }
+  }
+
   List<Widget> _buildExpandingActionButtons(Offset offset) {
     final children = <Widget>[];
     final count = widget.children.length;
-    var buttonOffset = 0.0;
-    if (_openButtonBuilder.size > _closeButtonBuilder.size) {
-      buttonOffset = (_openButtonBuilder.size - _closeButtonBuilder.size) / 2;
-    }
-    var totalOffset = offset;
-    if (widget.pos == ExpandableFabPos.right) {
-      totalOffset += widget.childrenOffset + Offset(buttonOffset, buttonOffset);
-    } else {
-      totalOffset += Offset(-widget.childrenOffset.dx - buttonOffset,
-          widget.childrenOffset.dy + buttonOffset);
-    }
+    final addedDistance =
+        widget.expandedFabSize == ExpandableFabSize.regular ? 0 : 0;
     for (var i = 0; i < count; i++) {
       final double dir, dist;
       switch (widget.type) {
         case ExpandableFabType.fan:
-          final half = (90 - widget.fanAngle) / 2;
-          if (count > 1) {
-            dir = widget.fanAngle / (count - 1) * i + half;
-          } else {
-            dir = widget.fanAngle + half;
+          if (count > 1) 
+          {
+            dir = widget.fanAngle / (count - 1) * i;
+          } 
+          else 
+          {
+            dir = widget.fanAngle;
           }
-          dist = widget.distance;
+          dist = widget.distance + addedDistance;
           break;
         case ExpandableFabType.up:
           dir = 90;
-          dist = widget.distance * (i + 1);
+          dist = widget.distance * (i + 1) + addedDistance;
           break;
-        case ExpandableFabType.side:
+        case ExpandableFabType.left:
           dir = 0;
-          dist = widget.distance * (i + 1);
+          dist = widget.distance * (i + 1) + addedDistance;
+          break;
+        case ExpandableFabType.right:
+          dir = 180;
+          dist = widget.distance * (i + 1) + addedDistance;
           break;
       }
       children.add(
         _ExpandingActionButton(
-          directionInDegrees: dir,
+          directionInDegrees: dir + (90 - widget.fanAngle) / 2,
           maxDistance: dist,
           progress: _expandAnimation,
-          offset: totalOffset,
-          fabPos: widget.pos,
+          offset: Offset(170, 347),
           child: widget.children[i],
         ),
       );
@@ -337,7 +388,8 @@ class ExpandableFabState extends State<ExpandableFab>
 
   Widget _buildTapToOpenFab() {
     final duration = widget.duration;
-    final transformValues = _closeButtonBuilder.size / _openButtonBuilder.size;
+    final transformValues =
+        widget.expandedFabSize == ExpandableFabSize.regular ? 1.0 : 0.715;
 
     return IgnorePointer(
       ignoring: _open,
@@ -349,35 +401,39 @@ class ExpandableFabState extends State<ExpandableFab>
           1.0,
         ),
         duration: duration,
-        curve: const Interval(0.0, 1.0, curve: Curves.easeInOut),
+        curve: const Interval(0.0, 0.5, curve: Curves.easeOut),
         child: AnimatedOpacity(
           opacity: _open ? 0.0 : 1.0,
-          curve: const Interval(0.0, 1.0, curve: Curves.easeInOut),
+          curve: const Interval(0.25, 1.0, curve: Curves.easeInOut),
           duration: duration,
-          child: _openButtonBuilder.builder(context, toggle, _expandAnimation),
+          child: widget.collapsedFabSize == ExpandableFabSize.regular
+              ? FloatingActionButton(
+                  heroTag: widget.openButtonHeroTag,
+                  foregroundColor: widget.foregroundColor,
+                  backgroundColor: widget.backgroundColor,
+                  shape: widget.collapsedFabShape,
+                  onPressed: toggle,
+                  child: AnimatedRotation(
+                    duration: duration,
+                    turns: _open ? -0.5 : 0,
+                    child: widget.child,
+                  ),
+                )
+              : FloatingActionButton.small(
+                  heroTag: widget.openButtonHeroTag,
+                  foregroundColor: widget.foregroundColor,
+                  backgroundColor: widget.backgroundColor,
+                  shape: widget.collapsedFabShape,
+                  onPressed: toggle,
+                  child: AnimatedRotation(
+                    duration: duration,
+                    turns: _open ? -0.5 : 0,
+                    child: widget.child,
+                  ),
+                ),
         ),
       ),
     );
-  }
-}
-
-class _ExpandableFabLocation extends StandardFabLocation {
-  final ValueNotifier<ScaffoldPrelayoutGeometry?> scaffoldGeometry =
-      ValueNotifier(null);
-
-  @override
-  double getOffsetX(
-      ScaffoldPrelayoutGeometry scaffoldGeometry, double adjustment) {
-    Future.microtask(() {
-      this.scaffoldGeometry.value = scaffoldGeometry;
-    });
-    return 0;
-  }
-
-  @override
-  double getOffsetY(
-      ScaffoldPrelayoutGeometry scaffoldGeometry, double adjustment) {
-    return -scaffoldGeometry.snackBarSize.height;
   }
 }
 
@@ -388,7 +444,6 @@ class _ExpandingActionButton extends StatelessWidget {
     required this.maxDistance,
     required this.progress,
     required this.child,
-    required this.fabPos,
     required this.offset,
   });
 
@@ -396,7 +451,6 @@ class _ExpandingActionButton extends StatelessWidget {
   final double maxDistance;
   final Animation<double> progress;
   final Offset offset;
-  final ExpandableFabPos fabPos;
   final Widget child;
 
   @override
@@ -409,9 +463,8 @@ class _ExpandingActionButton extends StatelessWidget {
           progress.value * maxDistance,
         );
         return Positioned(
-          right: fabPos == ExpandableFabPos.right ? offset.dx + pos.dx : null,
-          left: fabPos == ExpandableFabPos.right ? null : -offset.dx + pos.dx,
-          bottom: offset.dy + pos.dy,
+          right: offset.dx + pos.dx,
+          top: offset.dy + pos.dy,
           child: Transform.rotate(
             angle: (1.0 - progress.value) * math.pi / 2,
             child: IgnorePointer(
